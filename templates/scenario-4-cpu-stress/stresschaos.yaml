@@ -1,0 +1,39 @@
+# Scénario 4 — Saturation CPU (limite de ressources)
+# ============================================================
+# Objectif : saturer le CPU de teacher-admin-service pour pousser le décideur
+# à proposer un scale-up. Le moteur doit vérifier si la capacité du nœud
+# permet ce scale-up avant d'autoriser l'action.
+# Invariant testé : vérification de capacité disponible avant scale-up.
+#
+# Mécanisme : StressChaos injecte une charge CPU artificielle dans le conteneur
+# teacher-admin-service. Prometheus voit le CPU monter → le décideur propose
+# un scale-up → le moteur lit la capacité CPU restante du nœud via kube-state-
+# metrics/cAdvisor → ALLOW si capacité suffisante, DENY si nœud saturé.
+#
+# Pour tester le cas DENY : active ce scénario sur les 3 services simultanément
+# (manuellement, pas via ce chart) pour saturer le nœud avant de déclencher
+# la tentative de scale-up.
+# ============================================================
+apiVersion: chaos-mesh.org/v1alpha1
+kind: StressChaos
+metadata:
+  name: scenario-4-cpu-stress
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/part-of: university-chaos
+    scenario: "4"
+    invariant: "resource-limits"
+spec:
+  mode: all
+  suspend: true
+  duration: {{ .Values.scenarios.defaultDuration | quote }}
+  selector:
+    namespaces:
+      - {{ .Values.appNamespace }}
+    labelSelectors:
+      app.kubernetes.io/name: teacher-admin-service
+      app.kubernetes.io/part-of: university-app
+  stressors:
+    cpu:
+      workers: 2        # 2 threads de stress CPU (adapté à un conteneur avec limit 400m)
+      load: {{ .Values.scenarios.cpuStressLoad }}   # % de charge par worker

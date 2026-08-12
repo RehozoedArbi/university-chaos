@@ -1,0 +1,11 @@
+apiVersion: v2
+name: university-chaos
+description: >
+  Scénarios de chaos engineering (Chaos Mesh) pour le projet de moteur de
+  vérification de sûreté. 8 scénarios couvrant les 5 invariants de sûreté
+  + 3 scénarios de propagation en cascade sur le graphe de dépendances.
+  Chaque scénario est une ressource Chaos Mesh désactivée par défaut
+  (suspend: true) — à activer manuellement via le script trigger.sh.
+type: application
+version: 0.1.0
+appVersion: "1.0.0"

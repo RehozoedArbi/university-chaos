@@ -1,0 +1,47 @@
+# Scénario 2 — Rollback incompatible avec le schéma DB
+# ============================================================
+# Objectif : simuler une régression sur enrollment-service (erreurs HTTP 500
+# en série) pour pousser le décideur à proposer un rollback vers v1.
+# Le moteur doit bloquer : Version_Cible(S) incompatible avec Schema_DB_Actuel
+# ⟹ Deny(Rollback(S))
+#
+# Pré-requis (à faire manuellement AVANT d'activer ce scénario) :
+#   1. Déployer enrollment-service v2 avec une migration Alembic réelle
+#      (ex: ajout d'une colonne NOT NULL dans enrollment_schema)
+#   2. Mettre à jour la table de compatibilité du moteur :
+#      enrollment-service v1 → compatible schéma v1 uniquement
+#      enrollment-service v2 → compatible schéma v1 et v2
+#   Sans ces pré-requis, le moteur n'a rien à vérifier.
+#
+# Mécanisme Chaos Mesh : HTTPChaos injecte des réponses 500 sur les endpoints
+# d'enrollment-service, simulant une régression visible dans Prometheus
+# (taux d'erreur 5xx en hausse) → le décideur propose un rollback → le moteur
+# lit la table alembic_version et la table de compatibilité → DENY.
+#
+# suspend: true = désactivé par défaut
+# ============================================================
+apiVersion: chaos-mesh.org/v1alpha1
+kind: HTTPChaos
+metadata:
+  name: scenario-2-rollback-db-incompatibility
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/part-of: university-chaos
+    scenario: "2"
+    invariant: "db-compatibility"
+spec:
+  mode: all
+  suspend: true
+  duration: {{ .Values.scenarios.defaultDuration | quote }}
+  selector:
+    namespaces:
+      - {{ .Values.appNamespace }}
+    labelSelectors:
+      app.kubernetes.io/name: enrollment-service
+      app.kubernetes.io/part-of: university-app
+  target: Response     # intercepte les réponses sortantes du service
+  port: 5003
+  path: "/enrollments*"
+  method: GET
+  response:
+    statusCode: 500    # simule des erreurs 500 en série → déclenche le décideur

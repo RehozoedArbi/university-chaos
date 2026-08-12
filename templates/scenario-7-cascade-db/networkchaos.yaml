@@ -1,0 +1,43 @@
+# Scénario 7 — Panne en cascade complexe (cause racine : Postgres)
+# ============================================================
+# Objectif : injecter de la latence sur Postgres pour ralentir les 3 services
+# simultanément. Le moteur doit identifier via le graphe que la cause racine
+# est Postgres et bloquer toute action corrective sur les services applicatifs
+# (restart, rollback) qui ne résoudrait pas le vrai problème.
+#
+# C'est le scénario le plus riche scientifiquement : il teste le raisonnement
+# causal sur le graphe (causes vs symptômes), pas juste une règle isolée.
+#
+# Mécanisme : NetworkChaos injecte une latence élevée sur le pod postgres-0.
+# Les 3 backends voient leurs requêtes DB ralentir → latence P95 monte sur
+# les 3 services dans Prometheus → le décideur naïf propose des restarts sur
+# les 3 services applicatifs (il voit les symptômes, pas la cause) → le moteur
+# remonte le graphe de dépendances (student/enrollment/teacher-admin → DB),
+# identifie postgres comme nœud commun, et enrichit le verdict :
+# "cause probable = postgres, les restarts applicatifs ne résoudront pas le
+# problème".
+# ============================================================
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: scenario-7-cascade-db-root-cause
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/part-of: university-chaos
+    scenario: "7"
+    invariant: "dependency-graph-causal"
+spec:
+  action: delay
+  mode: all
+  suspend: true
+  duration: {{ .Values.scenarios.defaultDuration | quote }}
+  selector:
+    namespaces:
+      - {{ .Values.appNamespace }}
+    labelSelectors:
+      app.kubernetes.io/name: postgres
+      app.kubernetes.io/part-of: university-app
+  delay:
+    latency: "800ms"    # latence élevée sur la DB → timeout sur les 3 services
+    jitter: "200ms"
+  direction: to         # latence sur les requêtes entrantes vers postgres

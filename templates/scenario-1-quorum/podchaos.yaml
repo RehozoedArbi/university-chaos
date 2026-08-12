@@ -1,0 +1,37 @@
+# Scénario 1 — Violation du quorum de réplicas
+# ============================================================
+# Objectif : simuler la situation où enrollment-service n'a plus qu'un seul
+# réplica actif, puis déclencher une tentative de restart sur ce réplica
+# unique. Le moteur doit bloquer : Replicas_Ready(S) ≤ 1 ⟹ Deny(Restart(S))
+#
+# Mécanisme Chaos Mesh : PodChaos kind=pod-kill sur un pod enrollment-service.
+# Cela tue un des deux réplicas. Le HPA va tenter de le recréer, mais pendant
+# la fenêtre de recréation (quelques secondes), le service n'a qu'un réplica.
+# C'est pendant cette fenêtre que le décideur proposerait un restart
+# "pour stabiliser le service" — ce que le moteur doit intercepter.
+#
+# suspend: true = scénario désactivé par défaut.
+# Activer via : kubectl patch podchaos scenario-1-quorum-violation \
+#   -n university-chaos --type merge -p '{"spec":{"suspend":false}}'
+# Ou via le script trigger.sh
+# ============================================================
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  name: scenario-1-quorum-violation
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/part-of: university-chaos
+    scenario: "1"
+    invariant: "quorum"
+spec:
+  action: pod-kill
+  mode: one          # tue exactement 1 pod (laisse l'autre réplica actif)
+  suspend: true      # désactivé par défaut
+  duration: {{ .Values.scenarios.defaultDuration | quote }}
+  selector:
+    namespaces:
+      - {{ .Values.appNamespace }}
+    labelSelectors:
+      app.kubernetes.io/name: enrollment-service
+      app.kubernetes.io/part-of: university-app

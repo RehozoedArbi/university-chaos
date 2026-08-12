@@ -1,0 +1,20 @@
+namespace: university-chaos
+appNamespace: university-app
+
+# Tous les scénarios sont désactivés par défaut (suspend: true).
+# Utilise le script trigger.sh pour les activer/désactiver individuellement.
+# Ne jamais activer plusieurs scénarios simultanément sauf le scénario 8
+# (qui est lui-même un scénario combiné).
+
+scenarios:
+  # Durée par défaut de chaque injection de panne
+  defaultDuration: "60s"
+
+  # Délai de stabilisation pour la règle anti-flapping (scénario 3)
+  stabilizationDelay: "30s"
+
+  # Seuil de latence injectée (ms) pour les scénarios réseau
+  networkLatencyMs: 500
+
+  # Intensité de stress CPU (%) pour le scénario 4
+  cpuStressLoad: 80
