@@ -1,0 +1,24 @@
+apiVersion: chaos-mesh.org/v1alpha1
+kind: HTTPChaos
+metadata:
+  name: scenario-2-rollback-db-incompatibility
+  namespace: university-chaos
+  labels:
+    app.kubernetes.io/part-of: university-chaos
+    scenario: "2"
+    invariant: "db-compatibility"
+spec:
+  mode: all
+  duration: "60s"
+  selector:
+    namespaces:
+      - university-app
+    labelSelectors:
+      app.kubernetes.io/name: enrollment-service
+      app.kubernetes.io/part-of: university-app
+  target: Response
+  port: 5003
+  path: "/enrollments*"
+  method: GET
+  replace:
+    code: 500

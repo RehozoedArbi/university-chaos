@@ -1,0 +1,23 @@
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: scenario-7-cascade-db-root-cause
+  namespace: university-chaos
+  labels:
+    app.kubernetes.io/part-of: university-chaos
+    scenario: "7"
+    invariant: "dependency-graph-causal"
+spec:
+  action: delay
+  mode: all
+  duration: "60s"
+  selector:
+    namespaces:
+      - university-app
+    labelSelectors:
+      app.kubernetes.io/name: postgres
+      app.kubernetes.io/part-of: university-app
+  delay:
+    latency: "800ms"
+    jitter: "200ms"
+  direction: to

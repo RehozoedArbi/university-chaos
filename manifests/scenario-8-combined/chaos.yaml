@@ -1,0 +1,46 @@
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  name: scenario-8a-quorum-fragile
+  namespace: university-chaos
+  labels:
+    app.kubernetes.io/part-of: university-chaos
+    scenario: "8"
+    part: "a-quorum"
+    invariant: "combined"
+spec:
+  action: pod-kill
+  mode: one
+  duration: "60s"
+  selector:
+    namespaces:
+      - university-app
+    labelSelectors:
+      app.kubernetes.io/name: enrollment-service
+      app.kubernetes.io/part-of: university-app
+---
+apiVersion: chaos-mesh.org/v1alpha1
+kind: HTTPChaos
+metadata:
+  name: scenario-8b-rollback-trigger
+  namespace: university-chaos
+  labels:
+    app.kubernetes.io/part-of: university-chaos
+    scenario: "8"
+    part: "b-rollback"
+    invariant: "combined"
+spec:
+  mode: all
+  duration: "60s"
+  selector:
+    namespaces:
+      - university-app
+    labelSelectors:
+      app.kubernetes.io/name: enrollment-service
+      app.kubernetes.io/part-of: university-app
+  target: Response
+  port: 5003
+  path: "/enrollments*"
+  method: GET
+  replace:
+    code: 500

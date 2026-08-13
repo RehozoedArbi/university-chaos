@@ -1,0 +1,19 @@
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  name: scenario-6-cascade-2services
+  namespace: university-chaos
+  labels:
+    app.kubernetes.io/part-of: university-chaos
+    scenario: "6"
+    invariant: "dependency-graph"
+spec:
+  action: pod-failure
+  mode: all
+  duration: "60s"
+  selector:
+    namespaces:
+      - university-app
+    labelSelectors:
+      app.kubernetes.io/name: student-service
+      app.kubernetes.io/part-of: university-app

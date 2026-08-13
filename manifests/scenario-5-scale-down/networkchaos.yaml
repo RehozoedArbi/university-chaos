@@ -1,0 +1,23 @@
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: scenario-5-scale-down-minimum
+  namespace: university-chaos
+  labels:
+    app.kubernetes.io/part-of: university-chaos
+    scenario: "5"
+    invariant: "minimum-replicas"
+spec:
+  action: delay
+  mode: all
+  duration: "60s"
+  selector:
+    namespaces:
+      - university-app
+    labelSelectors:
+      app.kubernetes.io/name: enrollment-service
+      app.kubernetes.io/part-of: university-app
+  delay:
+    latency: "200ms"
+    jitter: "50ms"
+  direction: to

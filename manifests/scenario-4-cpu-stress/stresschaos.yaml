@@ -1,0 +1,22 @@
+apiVersion: chaos-mesh.org/v1alpha1
+kind: StressChaos
+metadata:
+  name: scenario-4-cpu-stress
+  namespace: university-chaos
+  labels:
+    app.kubernetes.io/part-of: university-chaos
+    scenario: "4"
+    invariant: "resource-limits"
+spec:
+  mode: all
+  duration: "60s"
+  selector:
+    namespaces:
+      - university-app
+    labelSelectors:
+      app.kubernetes.io/name: teacher-admin-service
+      app.kubernetes.io/part-of: university-app
+  stressors:
+    cpu:
+      workers: 2
+      load: 80

@@ -1,0 +1,24 @@
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: scenario-3-anti-flapping-latency
+  namespace: university-chaos
+  labels:
+    app.kubernetes.io/part-of: university-chaos
+    scenario: "3"
+    invariant: "anti-flapping"
+spec:
+  action: delay
+  mode: all
+  duration: "60s"
+  selector:
+    namespaces:
+      - university-app
+    labelSelectors:
+      app.kubernetes.io/name: student-service
+      app.kubernetes.io/part-of: university-app
+  delay:
+    latency: "500ms"
+    correlation: "50"
+    jitter: "100ms"
+  direction: to

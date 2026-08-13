@@ -3,170 +3,151 @@ set -euo pipefail
 
 # ============================================================
 # trigger.sh — Active ou désactive un scénario de chaos engineering
+# Stratégie : kubectl apply pour activer, kubectl delete pour désactiver
+# (le champ suspend n'est pas supporté dans Chaos Mesh 2.7)
+#
 # Usage :
-#   ./trigger.sh start <numero>    # active le scénario
-#   ./trigger.sh stop <numero>     # désactive le scénario
+#   ./trigger.sh start <numero>    # active le scénario (crée la ressource)
+#   ./trigger.sh stop <numero>     # désactive le scénario (supprime la ressource)
 #   ./trigger.sh stop-all          # désactive TOUS les scénarios
 #   ./trigger.sh status            # affiche l'état de tous les scénarios
-#
-# Exemples :
-#   ./trigger.sh start 1           # active le scénario 1 (quorum)
-#   ./trigger.sh start 8           # active le scénario 8 (combiné, 2 ressources)
-#   ./trigger.sh stop 1            # désactive le scénario 1
-#   ./trigger.sh stop-all          # reset complet, tous scénarios désactivés
 # ============================================================
 
 CHAOS_NS="university-chaos"
 APP_NS="university-app"
+# Chemin vers les manifests du chart — adapte si ton repo est structuré différemment
+CHART_DIR="$(cd "$(dirname "$0")/.." && pwd)/manifests"
 
 log()  { echo -e "\n\033[1;34m[chaos]\033[0m $1"; }
 ok()   { echo -e "\033[1;32m  ✓ $1\033[0m"; }
 err()  { echo -e "\033[1;31m  ✗ $1\033[0m"; exit 1; }
 warn() { echo -e "\033[1;33m  ⚠ $1\033[0m"; }
 
-# Vérifie que Chaos Mesh est installé
 check_chaos_mesh() {
-  if ! kubectl get crd podchaos.chaos-mesh.org &>/dev/null; then
-    err "Chaos Mesh n'est pas installé. Lance d'abord ./setup-chaos.sh"
+  kubectl get crd podchaos.chaos-mesh.org &>/dev/null || \
+    err "Chaos Mesh non installé. Lance d'abord ./setup-chaos.sh"
+}
+
+apply_manifest() {
+  local file=$1
+  kubectl apply -f "${file}" && ok "Appliqué : ${file##*/}"
+}
+
+delete_resource() {
+  local kind=$1 name=$2
+  if kubectl get "${kind}" "${name}" -n "${CHAOS_NS}" &>/dev/null; then
+    kubectl delete "${kind}" "${name}" -n "${CHAOS_NS}"
+    ok "${kind}/${name} supprimé"
+  else
+    ok "${kind}/${name} déjà absent"
   fi
 }
 
-# Active un scénario (suspend: false)
-activate() {
-  local resource_type=$1
-  local resource_name=$2
-  kubectl patch "${resource_type}" "${resource_name}" \
-    -n "${CHAOS_NS}" \
-    --type merge \
-    -p '{"spec":{"suspend":false}}'
-  ok "${resource_type}/${resource_name} activé"
-}
-
-# Désactive un scénario (suspend: true)
-deactivate() {
-  local resource_type=$1
-  local resource_name=$2
-  kubectl patch "${resource_type}" "${resource_name}" \
-    -n "${CHAOS_NS}" \
-    --type merge \
-    -p '{"spec":{"suspend":true}}' 2>/dev/null || true
-  ok "${resource_type}/${resource_name} désactivé"
-}
-
-# Attente observable — affiche les métriques clés pendant la durée de la panne
-watch_metrics() {
-  local scenario=$1
-  local duration=${2:-60}
+watch_pods() {
+  local duration=${1:-60}
   log "Observation en cours (${duration}s) — Ctrl+C pour arrêter"
-  echo "  → Dashboard Grafana : http://grafana.university.local:8080"
-  echo "  → Pods en temps réel :"
+  echo "  → Grafana : http://grafana.university.local:8080"
+  echo ""
   for i in $(seq 1 "${duration}"); do
-    printf "\r  [%02ds/%02ds] Pods: " "$i" "$duration"
-    kubectl get pods -n "${APP_NS}" \
-      --no-headers \
-      -o custom-columns='NAME:.metadata.name,STATUS:.status.phase,READY:.status.containerStatuses[0].ready' \
-      2>/dev/null | tr '\n' ' | ' | head -c 120
+    printf "\r  [%02ds/%02ds] " "$i" "$duration"
+    kubectl get pods -n "${APP_NS}" --no-headers \
+      -o custom-columns='NAME:.metadata.name,READY:.status.containerStatuses[0].ready' \
+      2>/dev/null | paste -sd '|' -
     sleep 1
   done
   echo ""
 }
 
 start_scenario() {
-  local scenario=$1
+  local s=$1
   check_chaos_mesh
-
-  case "${scenario}" in
+  case "${s}" in
     1)
       log "Scénario 1 — Violation du quorum (kill 1 pod enrollment-service)"
-      warn "Le HPA va recréer le pod — observe la fenêtre de vulnérabilité dans Grafana"
-      activate podchaos scenario-1-quorum-violation
-      watch_metrics 1 60
+      apply_manifest "${CHART_DIR}/scenario-1-quorum/podchaos.yaml"
+      watch_pods 60
       ;;
     2)
       log "Scénario 2 — Rollback incompatible avec schéma DB"
-      warn "Pré-requis : enrollment-service v2 déployé + migration Alembic appliquée"
-      warn "             + table de compatibilité du moteur mise à jour"
-      read -p "  Ces pré-requis sont satisfaits ? (y/N) " confirm
-      [[ "${confirm}" == "y" || "${confirm}" == "Y" ]] || { echo "Annulé."; exit 0; }
-      activate httpchaos scenario-2-rollback-db-incompatibility
-      watch_metrics 2 60
+      warn "Pré-requis : enrollment-service v2 déployé + migration Alembic + table compatibilité à jour"
+      read -r -p "  Ces pré-requis sont satisfaits ? (y/N) " confirm
+      [[ "${confirm}" =~ ^[yY]$ ]] || { echo "Annulé."; exit 0; }
+      apply_manifest "${CHART_DIR}/scenario-2-rollback-db/httpchaos.yaml"
+      watch_pods 60
       ;;
     3)
       log "Scénario 3 — Anti-flapping (latence réseau oscillante sur student-service)"
-      activate networkchaos scenario-3-anti-flapping-latency
-      watch_metrics 3 60
+      apply_manifest "${CHART_DIR}/scenario-3-anti-flapping/networkchaos.yaml"
+      watch_pods 60
       ;;
     4)
-      log "Scénario 4 — Saturation CPU (StressChaos sur teacher-admin-service)"
-      activate stresschaos scenario-4-cpu-stress
-      watch_metrics 4 60
+      log "Scénario 4 — Saturation CPU (teacher-admin-service)"
+      apply_manifest "${CHART_DIR}/scenario-4-cpu-stress/stresschaos.yaml"
+      watch_pods 60
       ;;
     5)
       log "Scénario 5 — Scale-down sous le minimum absolu (enrollment-service)"
-      activate networkchaos scenario-5-scale-down-minimum
-      watch_metrics 5 60
+      apply_manifest "${CHART_DIR}/scenario-5-scale-down/networkchaos.yaml"
+      watch_pods 60
       ;;
     6)
       log "Scénario 6 — Cascade 2 services (pod-failure total student-service)"
-      warn "enrollment-service va perdre sa dépendance student-service → erreurs 502 attendues"
-      activate podchaos scenario-6-cascade-2services
-      watch_metrics 6 60
+      warn "enrollment-service va perdre sa dépendance → erreurs 502 attendues"
+      apply_manifest "${CHART_DIR}/scenario-6-cascade-2services/podchaos.yaml"
+      watch_pods 60
       ;;
     7)
       log "Scénario 7 — Cascade DB (latence Postgres → 3 services impactés)"
-      warn "Les 3 services vont ralentir simultanément → cause racine = postgres"
-      activate networkchaos scenario-7-cascade-db-root-cause
-      watch_metrics 7 60
+      warn "Les 3 services vont ralentir → cause racine = postgres"
+      apply_manifest "${CHART_DIR}/scenario-7-cascade-db/networkchaos.yaml"
+      watch_pods 60
       ;;
     8)
       log "Scénario 8 — Combiné : quorum fragilisé + rollback incompatible"
-      warn "Pré-requis scénario 2 requis (v2 déployé + table compatibilité)"
-      read -p "  Ces pré-requis sont satisfaits ? (y/N) " confirm
-      [[ "${confirm}" == "y" || "${confirm}" == "Y" ]] || { echo "Annulé."; exit 0; }
-      activate podchaos  scenario-8a-quorum-fragile
-      activate httpchaos scenario-8b-rollback-trigger
-      watch_metrics 8 60
+      warn "Pré-requis scénario 2 requis (v2 + table compatibilité)"
+      read -r -p "  Ces pré-requis sont satisfaits ? (y/N) " confirm
+      [[ "${confirm}" =~ ^[yY]$ ]] || { echo "Annulé."; exit 0; }
+      # Les deux parties sont dans le même fichier (séparées par ---)
+      apply_manifest "${CHART_DIR}/scenario-8-combined/chaos.yaml"
+      watch_pods 60
       ;;
-    *)
-      err "Scénario inconnu : ${scenario}. Valeurs valides : 1 à 8"
-      ;;
+    *) err "Scénario inconnu : ${s}. Valeurs valides : 1 à 8" ;;
   esac
 }
 
 stop_scenario() {
-  local scenario=$1
+  local s=$1
   check_chaos_mesh
-
-  case "${scenario}" in
-    1) deactivate podchaos   scenario-1-quorum-violation ;;
-    2) deactivate httpchaos  scenario-2-rollback-db-incompatibility ;;
-    3) deactivate networkchaos scenario-3-anti-flapping-latency ;;
-    4) deactivate stresschaos  scenario-4-cpu-stress ;;
-    5) deactivate networkchaos scenario-5-scale-down-minimum ;;
-    6) deactivate podchaos   scenario-6-cascade-2services ;;
-    7) deactivate networkchaos scenario-7-cascade-db-root-cause ;;
+  case "${s}" in
+    1) delete_resource podchaos    scenario-1-quorum-violation ;;
+    2) delete_resource httpchaos   scenario-2-rollback-db-incompatibility ;;
+    3) delete_resource networkchaos scenario-3-anti-flapping-latency ;;
+    4) delete_resource stresschaos  scenario-4-cpu-stress ;;
+    5) delete_resource networkchaos scenario-5-scale-down-minimum ;;
+    6) delete_resource podchaos    scenario-6-cascade-2services ;;
+    7) delete_resource networkchaos scenario-7-cascade-db-root-cause ;;
     8)
-       deactivate podchaos  scenario-8a-quorum-fragile
-       deactivate httpchaos scenario-8b-rollback-trigger
+       delete_resource podchaos  scenario-8a-quorum-fragile
+       delete_resource httpchaos scenario-8b-rollback-trigger
        ;;
-    *) err "Scénario inconnu : ${scenario}. Valeurs valides : 1 à 8" ;;
+    *) err "Scénario inconnu : ${s}. Valeurs valides : 1 à 8" ;;
   esac
-  ok "Scénario ${scenario} désactivé — le système va se stabiliser dans quelques secondes"
+  ok "Scénario ${s} arrêté — le système va se stabiliser dans quelques secondes"
 }
 
 stop_all() {
   check_chaos_mesh
-  log "Désactivation de tous les scénarios"
-  deactivate podchaos    scenario-1-quorum-violation         || true
-  deactivate httpchaos   scenario-2-rollback-db-incompatibility || true
-  deactivate networkchaos scenario-3-anti-flapping-latency   || true
-  deactivate stresschaos  scenario-4-cpu-stress              || true
-  deactivate networkchaos scenario-5-scale-down-minimum      || true
-  deactivate podchaos    scenario-6-cascade-2services        || true
-  deactivate networkchaos scenario-7-cascade-db-root-cause   || true
-  deactivate podchaos    scenario-8a-quorum-fragile          || true
-  deactivate httpchaos   scenario-8b-rollback-trigger        || true
-  ok "Tous les scénarios désactivés"
+  log "Arrêt de tous les scénarios actifs"
+  delete_resource podchaos    scenario-1-quorum-violation          || true
+  delete_resource httpchaos   scenario-2-rollback-db-incompatibility || true
+  delete_resource networkchaos scenario-3-anti-flapping-latency    || true
+  delete_resource stresschaos  scenario-4-cpu-stress               || true
+  delete_resource networkchaos scenario-5-scale-down-minimum       || true
+  delete_resource podchaos    scenario-6-cascade-2services         || true
+  delete_resource networkchaos scenario-7-cascade-db-root-cause    || true
+  delete_resource podchaos    scenario-8a-quorum-fragile           || true
+  delete_resource httpchaos   scenario-8b-rollback-trigger         || true
+  ok "Tous les scénarios arrêtés"
 }
 
 status_all() {
@@ -176,48 +157,37 @@ status_all() {
   printf "%-50s %-15s %-10s\n" "RESSOURCE" "TYPE" "ACTIF"
   printf "%-50s %-15s %-10s\n" "--------" "----" "-----"
 
-  for res in \
-    "podchaos/scenario-1-quorum-violation" \
-    "httpchaos/scenario-2-rollback-db-incompatibility" \
-    "networkchaos/scenario-3-anti-flapping-latency" \
-    "stresschaos/scenario-4-cpu-stress" \
-    "networkchaos/scenario-5-scale-down-minimum" \
-    "podchaos/scenario-6-cascade-2services" \
-    "networkchaos/scenario-7-cascade-db-root-cause" \
-    "podchaos/scenario-8a-quorum-fragile" \
-    "httpchaos/scenario-8b-rollback-trigger"; do
-    type="${res%%/*}"
-    name="${res##*/}"
-    suspended=$(kubectl get "${type}" "${name}" -n "${CHAOS_NS}" \
-      -o jsonpath='{.spec.suspend}' 2>/dev/null || echo "absent")
-    if [[ "${suspended}" == "false" ]]; then
-      active="\033[1;32mOUI\033[0m"
-    elif [[ "${suspended}" == "true" ]]; then
-      active="non"
+  check_resource() {
+    local kind=$1 name=$2
+    if kubectl get "${kind}" "${name}" -n "${CHAOS_NS}" &>/dev/null; then
+      echo -e "\033[1;32mOUI\033[0m"
     else
-      active="\033[1;31mABSENT\033[0m"
+      echo "non"
     fi
-    printf "%-50s %-15s " "${name}" "${type}"
-    echo -e "${active}"
-  done
+  }
+
+  printf "%-50s %-15s " "scenario-1-quorum-violation"             "podchaos";     check_resource podchaos    scenario-1-quorum-violation
+  printf "%-50s %-15s " "scenario-2-rollback-db-incompatibility"  "httpchaos";    check_resource httpchaos   scenario-2-rollback-db-incompatibility
+  printf "%-50s %-15s " "scenario-3-anti-flapping-latency"        "networkchaos"; check_resource networkchaos scenario-3-anti-flapping-latency
+  printf "%-50s %-15s " "scenario-4-cpu-stress"                   "stresschaos";  check_resource stresschaos  scenario-4-cpu-stress
+  printf "%-50s %-15s " "scenario-5-scale-down-minimum"           "networkchaos"; check_resource networkchaos scenario-5-scale-down-minimum
+  printf "%-50s %-15s " "scenario-6-cascade-2services"            "podchaos";     check_resource podchaos    scenario-6-cascade-2services
+  printf "%-50s %-15s " "scenario-7-cascade-db-root-cause"        "networkchaos"; check_resource networkchaos scenario-7-cascade-db-root-cause
+  printf "%-50s %-15s " "scenario-8a-quorum-fragile"              "podchaos";     check_resource podchaos    scenario-8a-quorum-fragile
+  printf "%-50s %-15s " "scenario-8b-rollback-trigger"            "httpchaos";    check_resource httpchaos   scenario-8b-rollback-trigger
   echo ""
 }
 
-# ============================================================
 # Point d'entrée
-# ============================================================
-if [[ $# -lt 1 ]]; then
-  echo "Usage : ./trigger.sh <start|stop|stop-all|status> [numero_scenario]"
-  exit 1
-fi
+[[ $# -lt 1 ]] && { echo "Usage : ./trigger.sh <start|stop|stop-all|status> [numero]"; exit 1; }
 
 ACTION=$1
 SCENARIO=${2:-""}
 
 case "${ACTION}" in
-  start)    [[ -z "${SCENARIO}" ]] && err "Précise le numéro du scénario (1-8)"; start_scenario "${SCENARIO}" ;;
-  stop)     [[ -z "${SCENARIO}" ]] && err "Précise le numéro du scénario (1-8)"; stop_scenario  "${SCENARIO}" ;;
+  start)    [[ -z "${SCENARIO}" ]] && err "Précise le numéro (1-8)"; start_scenario "${SCENARIO}" ;;
+  stop)     [[ -z "${SCENARIO}" ]] && err "Précise le numéro (1-8)"; stop_scenario  "${SCENARIO}" ;;
   stop-all) stop_all ;;
   status)   status_all ;;
-  *) err "Action inconnue : ${ACTION}. Valeurs valides : start, stop, stop-all, status" ;;
+  *) err "Action inconnue : ${ACTION}. Valeurs : start, stop, stop-all, status" ;;
 esac
