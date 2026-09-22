@@ -10,7 +10,6 @@ metadata:
 spec:
   action: pod-failure
   mode: all
-  duration: "60s"
   selector:
     namespaces:
       - university-app

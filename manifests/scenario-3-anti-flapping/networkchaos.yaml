@@ -10,7 +10,6 @@ metadata:
 spec:
   action: delay
   mode: all
-  duration: "60s"
   selector:
     namespaces:
       - university-app
@@ -18,7 +17,7 @@ spec:
       app.kubernetes.io/name: student-service
       app.kubernetes.io/part-of: university-app
   delay:
-    latency: "500ms"
+    latency: "300ms"
     correlation: "50"
     jitter: "100ms"
   direction: to

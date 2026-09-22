@@ -8,9 +8,8 @@ metadata:
     scenario: "1"
     invariant: "quorum"
 spec:
-  action: pod-kill
-  mode: one
-  duration: "60s"
+  action: pod-failure
+  mode: all
   selector:
     namespaces:
       - university-app

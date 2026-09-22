@@ -9,7 +9,6 @@ metadata:
     invariant: "db-compatibility"
 spec:
   mode: all
-  duration: "60s"
   selector:
     namespaces:
       - university-app

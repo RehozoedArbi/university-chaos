@@ -11,7 +11,6 @@ metadata:
 spec:
   action: pod-kill
   mode: one
-  duration: "60s"
   selector:
     namespaces:
       - university-app
@@ -31,7 +30,6 @@ metadata:
     invariant: "combined"
 spec:
   mode: all
-  duration: "60s"
   selector:
     namespaces:
       - university-app
